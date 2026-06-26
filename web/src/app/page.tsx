@@ -12,6 +12,7 @@ import {
   updateDoc,
 } from "firebase/firestore";
 import { db } from "../lib/firebase";
+console.log("ENV_PROJECT_ID:", process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID);
 
 type FlightStatus = "On Time" | "Delayed" | "Boarding";
 
