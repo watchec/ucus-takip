@@ -1,29 +1,35 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  onSnapshot,
+  orderBy,
+  query,
+  updateDoc,
+} from "firebase/firestore";
+import { db } from "../lib/firebase";
 
 type FlightStatus = "On Time" | "Delayed" | "Boarding";
 
 type Flight = {
-  id: number;
+  id: string;
   code: string;
   from: string;
   to: string;
   time: string;
   status: FlightStatus;
+  createdAt?: number;
 };
-
-const seedFlights: Flight[] = [
-  { id: 1, code: "TK2419", from: "IST", to: "ESB", time: "09:30", status: "On Time" },
-  { id: 2, code: "PC1012", from: "SAW", to: "AYT", time: "10:15", status: "Boarding" },
-  { id: 3, code: "AJ455", from: "ADB", to: "DLM", time: "11:05", status: "Delayed" },
-];
-
-const STORAGE_KEY = "ucus-takip-flights-v2";
 
 export default function Home() {
   const [flights, setFlights] = useState<Flight[]>([]);
-  const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  const [queryText, setQueryText] = useState("");
   const [statusFilter, setStatusFilter] = useState<"All" | FlightStatus>("All");
 
   const [form, setForm] = useState({
@@ -34,28 +40,31 @@ export default function Home() {
     status: "On Time" as FlightStatus,
   });
 
-  // load
+  // Firestore realtime subscribe
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        setFlights(JSON.parse(raw) as Flight[]);
-      } else {
-        setFlights(seedFlights);
+    const q = query(collection(db, "flights"), orderBy("createdAt", "desc"));
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const list: Flight[] = snap.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<Flight, "id">),
+        }));
+        setFlights(list);
+        setLoading(false);
+      },
+      (err) => {
+        console.error("Firestore read error:", err);
+        setLoading(false);
       }
-    } catch {
-      setFlights(seedFlights);
-    }
-  }, []);
+    );
 
-  // persist
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(flights));
-  }, [flights]);
+    return () => unsub();
+  }, []);
 
   const filteredFlights = useMemo(() => {
     return flights.filter((f) => {
-      const q = query.trim().toLowerCase();
+      const q = queryText.trim().toLowerCase();
       const matchesQuery =
         q.length === 0 ||
         f.code.toLowerCase().includes(q) ||
@@ -65,51 +74,68 @@ export default function Home() {
       const matchesStatus = statusFilter === "All" ? true : f.status === statusFilter;
       return matchesQuery && matchesStatus;
     });
-  }, [flights, query, statusFilter]);
+  }, [flights, queryText, statusFilter]);
 
   const stats = useMemo(() => {
     const total = flights.length;
-    const delayed = flights.filter((f) => f.status === "Delayed").length;
     const boarding = flights.filter((f) => f.status === "Boarding").length;
-    return { total, delayed, boarding };
+    const delayed = flights.filter((f) => f.status === "Delayed").length;
+    return { total, boarding, delayed };
   }, [flights]);
 
-  const addFlight = (e: React.FormEvent) => {
+  const addFlight = async (e: React.FormEvent) => {
     e.preventDefault();
+
     if (!form.code || !form.from || !form.to || !form.time) {
       alert("Lütfen tüm alanları doldur.");
       return;
     }
 
-    const newFlight: Flight = {
-      id: Date.now(),
-      code: form.code.trim().toUpperCase(),
-      from: form.from.trim().toUpperCase(),
-      to: form.to.trim().toUpperCase(),
-      time: form.time,
-      status: form.status,
-    };
+    try {
+      await addDoc(collection(db, "flights"), {
+        code: form.code.trim().toUpperCase(),
+        from: form.from.trim().toUpperCase(),
+        to: form.to.trim().toUpperCase(),
+        time: form.time,
+        status: form.status,
+        createdAt: Date.now(),
+      });
 
-    setFlights((prev) => [newFlight, ...prev]);
-    setForm({ code: "", from: "", to: "", time: "", status: "On Time" });
+      setForm({
+        code: "",
+        from: "",
+        to: "",
+        time: "",
+        status: "On Time",
+      });
+    } catch (err) {
+      console.error(err);
+      alert("Uçuş eklenemedi.");
+    }
   };
 
-  const deleteFlight = (id: number) => {
-    setFlights((prev) => prev.filter((f) => f.id !== id));
+  const removeFlight = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, "flights", id));
+    } catch (err) {
+      console.error(err);
+      alert("Uçuş silinemedi.");
+    }
   };
 
-  const updateStatus = (id: number, next: FlightStatus) => {
-    setFlights((prev) => prev.map((f) => (f.id === id ? { ...f, status: next } : f)));
-  };
-
-  const clearAll = () => {
-    if (!confirm("Tüm uçuşları silmek istediğine emin misin?")) return;
-    setFlights([]);
-    localStorage.removeItem(STORAGE_KEY);
+  const setFlightStatus = async (id: string, status: FlightStatus) => {
+    try {
+      await updateDoc(doc(db, "flights", id), { status });
+    } catch (err) {
+      console.error(err);
+      alert("Durum güncellenemedi.");
+    }
   };
 
   const exportJSON = () => {
-    const blob = new Blob([JSON.stringify(flights, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify(flights, null, 2)], {
+      type: "application/json",
+    });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -123,37 +149,29 @@ export default function Home() {
       <section className="mx-auto max-w-6xl px-6 py-10">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-3xl font-bold sm:text-5xl">
-            Uçuş Takip <span className="text-cyan-400">Dashboard</span>
+            Uçuş Takip <span className="text-cyan-400">Firestore</span>
           </h1>
 
-          <div className="flex gap-2">
-            <button
-              onClick={exportJSON}
-              className="rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-300 hover:bg-cyan-500/20"
-            >
-              JSON Export
-            </button>
-            <button
-              onClick={clearAll}
-              className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-2 text-sm font-semibold text-rose-300 hover:bg-rose-500/20"
-            >
-              Tümünü Temizle
-            </button>
-          </div>
+          <button
+            onClick={exportJSON}
+            className="rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-300 hover:bg-cyan-500/20"
+          >
+            JSON Export
+          </button>
         </div>
 
         <p className="mt-3 text-slate-300">
-          Uçuş ekle, ara, filtrele, durum güncelle. Veriler tarayıcıda saklanır.
+          Veriler artık Firebase Firestore’da tutulur (cihazlar arası senkron).
         </p>
 
         <div className="mt-8 grid gap-4 sm:grid-cols-3">
-          <StatCard title="Toplam Uçuş" value={stats.total.toString()} />
-          <StatCard title="Boarding" value={stats.boarding.toString()} accent="text-amber-400" />
-          <StatCard title="Gecikmeli" value={stats.delayed.toString()} accent="text-rose-400" />
+          <StatCard title="Toplam Uçuş" value={String(stats.total)} />
+          <StatCard title="Boarding" value={String(stats.boarding)} accent="text-amber-400" />
+          <StatCard title="Gecikmeli" value={String(stats.delayed)} accent="text-rose-400" />
         </div>
 
         <div className="mt-8 grid gap-6 lg:grid-cols-3">
-          {/* Form */}
+          {/* Add form */}
           <form
             onSubmit={addFlight}
             className="rounded-2xl border border-slate-800 bg-slate-900 p-5 lg:col-span-1"
@@ -187,11 +205,9 @@ export default function Home() {
               />
 
               <select
-                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 outline-none"
                 value={form.status}
-                onChange={(e) =>
-                  setForm((p) => ({ ...p, status: e.target.value as FlightStatus }))
-                }
+                onChange={(e) => setForm((p) => ({ ...p, status: e.target.value as FlightStatus }))}
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 outline-none"
               >
                 <option>On Time</option>
                 <option>Boarding</option>
@@ -207,14 +223,14 @@ export default function Home() {
             </button>
           </form>
 
-          {/* List + filters */}
+          {/* List */}
           <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5 lg:col-span-2">
             <h2 className="text-xl font-semibold">Uçuşlar</h2>
 
             <div className="mt-4 grid gap-3 sm:grid-cols-3">
               <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
+                value={queryText}
+                onChange={(e) => setQueryText(e.target.value)}
                 placeholder="Ara: TK, IST, ESB..."
                 className="sm:col-span-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 outline-none"
               />
@@ -230,48 +246,51 @@ export default function Home() {
               </select>
             </div>
 
-            {filteredFlights.length === 0 ? (
-              <p className="mt-4 text-slate-400">Sonuç yok.</p>
+            {loading ? (
+              <p className="mt-4 text-slate-400">Yükleniyor...</p>
+            ) : filteredFlights.length === 0 ? (
+              <p className="mt-4 text-slate-400">Kayıt bulunamadı.</p>
             ) : (
               <div className="mt-4 space-y-3">
-                {filteredFlights.map((flight) => (
+                {filteredFlights.map((f) => (
                   <div
-                    key={flight.id}
+                    key={f.id}
                     className="flex flex-col gap-3 rounded-xl border border-slate-800 bg-slate-950 p-4"
                   >
                     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                       <div>
-                        <p className="text-lg font-bold">{flight.code}</p>
+                        <p className="text-lg font-bold">{f.code}</p>
                         <p className="text-sm text-slate-400">
-                          {flight.from} → {flight.to} • {flight.time}
+                          {f.from} → {f.to} • {f.time}
                         </p>
                       </div>
-                      <StatusBadge status={flight.status} />
+                      <StatusBadge status={f.status} />
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-xs text-slate-400">Durum değiştir:</span>
+                      <span className="text-xs text-slate-400">Durum:</span>
+
                       <button
-                        onClick={() => updateStatus(flight.id, "On Time")}
+                        onClick={() => setFlightStatus(f.id, "On Time")}
                         className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-300"
                       >
                         On Time
                       </button>
                       <button
-                        onClick={() => updateStatus(flight.id, "Boarding")}
+                        onClick={() => setFlightStatus(f.id, "Boarding")}
                         className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1 text-xs text-amber-300"
                       >
                         Boarding
                       </button>
                       <button
-                        onClick={() => updateStatus(flight.id, "Delayed")}
+                        onClick={() => setFlightStatus(f.id, "Delayed")}
                         className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-1 text-xs text-rose-300"
                       >
                         Delayed
                       </button>
 
                       <button
-                        onClick={() => deleteFlight(flight.id)}
+                        onClick={() => removeFlight(f.id)}
                         className="ml-auto rounded-lg border border-slate-700 px-3 py-1 text-xs text-slate-300 hover:bg-slate-800"
                       >
                         Sil
