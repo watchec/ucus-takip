@@ -40,26 +40,26 @@ export default function Home() {
     status: "On Time" as FlightStatus,
   });
 
-  // Firestore realtime subscribe (orderBy yok -> index takılması olmaz)
+
   useEffect(() => {
     const q = query(collection(db, "flights"));
 
     const unsub = onSnapshot(
       q,
       (snap) => {
+
         const list: Flight[] = snap.docs.map((d) => ({
           id: d.id,
           ...(d.data() as Omit<Flight, "id">),
         }));
 
-        // client-side sort (createdAt varsa yeni üstte)
         list.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
 
         setFlights(list);
         setLoading(false);
       },
       (err) => {
-        console.error("Firestore read error:", err);
+        console.error("SNAP ERR:", err);
         setError(err?.message || "Firestore okuma hatası");
         setLoading(false);
       }
@@ -98,7 +98,7 @@ export default function Home() {
     }
 
     try {
-      await addDoc(collection(db, "flights"), {
+      const ref = await addDoc(collection(db, "flights"), {
         code: form.code.trim().toUpperCase(),
         from: form.from.trim().toUpperCase(),
         to: form.to.trim().toUpperCase(),
@@ -106,6 +106,7 @@ export default function Home() {
         status: form.status,
         createdAt: Date.now(),
       });
+
 
       setForm({
         code: "",
@@ -115,7 +116,7 @@ export default function Home() {
         status: "On Time",
       });
     } catch (err) {
-      console.error(err);
+      console.error("ADD ERR:", err);
       alert("Uçuş eklenemedi.");
     }
   };
@@ -138,37 +139,14 @@ export default function Home() {
     }
   };
 
-  const exportJSON = () => {
-    const blob = new Blob([JSON.stringify(flights, null, 2)], {
-      type: "application/json",
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "flights.json";
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
   return (
     <main className="min-h-screen bg-slate-950 text-white">
       <section className="mx-auto max-w-6xl px-6 py-10">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="text-3xl font-bold sm:text-5xl">
-            Uçuş Takip <span className="text-cyan-400">Firestore</span>
-          </h1>
+        <h1 className="text-3xl font-bold sm:text-5xl">
+          Uçuş Takip <span className="text-cyan-400">Firestore</span>
+        </h1>
 
-          <button
-            onClick={exportJSON}
-            className="rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-300 hover:bg-cyan-500/20"
-          >
-            JSON Export
-          </button>
-        </div>
-
-        <p className="mt-3 text-slate-300">
-          Veriler Firebase Firestore’da tutulur (cihazlar arası senkron).
-        </p>
+        {error && <p className="mt-3 text-rose-400">Hata: {error}</p>}
 
         <div className="mt-8 grid gap-4 sm:grid-cols-3">
           <StatCard title="Toplam Uçuş" value={String(stats.total)} />
@@ -177,130 +155,47 @@ export default function Home() {
         </div>
 
         <div className="mt-8 grid gap-6 lg:grid-cols-3">
-          <form
-            onSubmit={addFlight}
-            className="rounded-2xl border border-slate-800 bg-slate-900 p-5 lg:col-span-1"
-          >
+          <form onSubmit={addFlight} className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
             <h2 className="text-xl font-semibold">Takip Ekle</h2>
-
             <div className="mt-4 space-y-3">
-              <Input
-                placeholder="Uçuş Kodu (TK1234)"
-                value={form.code}
-                onChange={(v) => setForm((p) => ({ ...p, code: v }))}
-              />
-
+              <Input placeholder="Uçuş Kodu" value={form.code} onChange={(v) => setForm((p) => ({ ...p, code: v }))} />
               <div className="grid grid-cols-2 gap-3">
-                <Input
-                  placeholder="Nereden (IST)"
-                  value={form.from}
-                  onChange={(v) => setForm((p) => ({ ...p, from: v }))}
-                />
-                <Input
-                  placeholder="Nereye (ESB)"
-                  value={form.to}
-                  onChange={(v) => setForm((p) => ({ ...p, to: v }))}
-                />
+                <Input placeholder="Nereden" value={form.from} onChange={(v) => setForm((p) => ({ ...p, from: v }))} />
+                <Input placeholder="Nereye" value={form.to} onChange={(v) => setForm((p) => ({ ...p, to: v }))} />
               </div>
-
-              <Input
-                type="time"
-                value={form.time}
-                onChange={(v) => setForm((p) => ({ ...p, time: v }))}
-              />
-
+              <Input type="time" value={form.time} onChange={(v) => setForm((p) => ({ ...p, time: v }))} />
               <select
                 value={form.status}
                 onChange={(e) => setForm((p) => ({ ...p, status: e.target.value as FlightStatus }))}
-                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 outline-none"
+                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2"
               >
                 <option>On Time</option>
                 <option>Boarding</option>
                 <option>Delayed</option>
               </select>
             </div>
-
-            <button
-              type="submit"
-              className="mt-4 w-full rounded-xl bg-cyan-400 px-4 py-2 font-semibold text-slate-950 hover:bg-cyan-300"
-            >
+            <button type="submit" className="mt-4 w-full rounded-xl bg-cyan-400 px-4 py-2 font-semibold text-slate-950">
               Uçuşu Ekle
             </button>
           </form>
 
           <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5 lg:col-span-2">
             <h2 className="text-xl font-semibold">Uçuşlar</h2>
-
-            <div className="mt-4 grid gap-3 sm:grid-cols-3">
-              <input
-                value={queryText}
-                onChange={(e) => setQueryText(e.target.value)}
-                placeholder="Ara: TK, IST, ESB..."
-                className="sm:col-span-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 outline-none"
-              />
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value as "All" | FlightStatus)}
-                className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 outline-none"
-              >
-                <option value="All">Tüm Durumlar</option>
-                <option value="On Time">On Time</option>
-                <option value="Boarding">Boarding</option>
-                <option value="Delayed">Delayed</option>
-              </select>
-            </div>
-
-            {error ? (
-              <p className="mt-4 text-rose-400">Hata: {error}</p>
-            ) : loading ? (
+            {loading ? (
               <p className="mt-4 text-slate-400">Yükleniyor...</p>
             ) : filteredFlights.length === 0 ? (
               <p className="mt-4 text-slate-400">Kayıt bulunamadı.</p>
             ) : (
               <div className="mt-4 space-y-3">
                 {filteredFlights.map((f) => (
-                  <div
-                    key={f.id}
-                    className="flex flex-col gap-3 rounded-xl border border-slate-800 bg-slate-950 p-4"
-                  >
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <div>
-                        <p className="text-lg font-bold">{f.code}</p>
-                        <p className="text-sm text-slate-400">
-                          {f.from} → {f.to} • {f.time}
-                        </p>
-                      </div>
-                      <StatusBadge status={f.status} />
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-xs text-slate-400">Durum:</span>
-
-                      <button
-                        onClick={() => setFlightStatus(f.id, "On Time")}
-                        className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-300"
-                      >
-                        On Time
-                      </button>
-                      <button
-                        onClick={() => setFlightStatus(f.id, "Boarding")}
-                        className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1 text-xs text-amber-300"
-                      >
-                        Boarding
-                      </button>
-                      <button
-                        onClick={() => setFlightStatus(f.id, "Delayed")}
-                        className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-1 text-xs text-rose-300"
-                      >
-                        Delayed
-                      </button>
-
-                      <button
-                        onClick={() => removeFlight(f.id)}
-                        className="ml-auto rounded-lg border border-slate-700 px-3 py-1 text-xs text-slate-300 hover:bg-slate-800"
-                      >
-                        Sil
-                      </button>
+                  <div key={f.id} className="rounded-xl border border-slate-800 bg-slate-950 p-4">
+                    <p className="text-lg font-bold">{f.code}</p>
+                    <p className="text-sm text-slate-400">{f.from} → {f.to} • {f.time}</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <button onClick={() => setFlightStatus(f.id, "On Time")} className="rounded-lg border px-3 py-1 text-xs">On Time</button>
+                      <button onClick={() => setFlightStatus(f.id, "Boarding")} className="rounded-lg border px-3 py-1 text-xs">Boarding</button>
+                      <button onClick={() => setFlightStatus(f.id, "Delayed")} className="rounded-lg border px-3 py-1 text-xs">Delayed</button>
+                      <button onClick={() => removeFlight(f.id)} className="ml-auto rounded-lg border px-3 py-1 text-xs">Sil</button>
                     </div>
                   </div>
                 ))}
@@ -313,15 +208,7 @@ export default function Home() {
   );
 }
 
-function StatCard({
-  title,
-  value,
-  accent,
-}: {
-  title: string;
-  value: string;
-  accent?: string;
-}) {
+function StatCard({ title, value, accent }: { title: string; value: string; accent?: string }) {
   return (
     <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4">
       <p className="text-sm text-slate-400">{title}</p>
@@ -347,18 +234,7 @@ function Input({
       value={value}
       placeholder={placeholder}
       onChange={(e) => onChange(e.target.value)}
-      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 outline-none"
+      className="w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2"
     />
   );
-}
-
-function StatusBadge({ status }: { status: FlightStatus }) {
-  const cls =
-    status === "On Time"
-      ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
-      : status === "Boarding"
-      ? "bg-amber-500/15 text-amber-300 border-amber-500/30"
-      : "bg-rose-500/15 text-rose-300 border-rose-500/30";
-
-  return <span className={`rounded-full border px-3 py-1 text-sm font-medium ${cls}`}>{status}</span>;
 }
