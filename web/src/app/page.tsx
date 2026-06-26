@@ -7,12 +7,10 @@ import {
   deleteDoc,
   doc,
   onSnapshot,
-  orderBy,
   query,
   updateDoc,
 } from "firebase/firestore";
 import { db } from "../lib/firebase";
-console.log("ENV_PROJECT_ID:", process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID);
 
 type FlightStatus = "On Time" | "Delayed" | "Boarding";
 
@@ -29,6 +27,7 @@ type Flight = {
 export default function Home() {
   const [flights, setFlights] = useState<Flight[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const [queryText, setQueryText] = useState("");
   const [statusFilter, setStatusFilter] = useState<"All" | FlightStatus>("All");
@@ -41,9 +40,10 @@ export default function Home() {
     status: "On Time" as FlightStatus,
   });
 
-  // Firestore realtime subscribe
+  // Firestore realtime subscribe (orderBy yok -> index takılması olmaz)
   useEffect(() => {
-    const q = query(collection(db, "flights"), orderBy("createdAt", "desc"));
+    const q = query(collection(db, "flights"));
+
     const unsub = onSnapshot(
       q,
       (snap) => {
@@ -51,11 +51,16 @@ export default function Home() {
           id: d.id,
           ...(d.data() as Omit<Flight, "id">),
         }));
+
+        // client-side sort (createdAt varsa yeni üstte)
+        list.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+
         setFlights(list);
         setLoading(false);
       },
       (err) => {
         console.error("Firestore read error:", err);
+        setError(err?.message || "Firestore okuma hatası");
         setLoading(false);
       }
     );
@@ -162,7 +167,7 @@ export default function Home() {
         </div>
 
         <p className="mt-3 text-slate-300">
-          Veriler artık Firebase Firestore’da tutulur (cihazlar arası senkron).
+          Veriler Firebase Firestore’da tutulur (cihazlar arası senkron).
         </p>
 
         <div className="mt-8 grid gap-4 sm:grid-cols-3">
@@ -172,7 +177,6 @@ export default function Home() {
         </div>
 
         <div className="mt-8 grid gap-6 lg:grid-cols-3">
-          {/* Add form */}
           <form
             onSubmit={addFlight}
             className="rounded-2xl border border-slate-800 bg-slate-900 p-5 lg:col-span-1"
@@ -224,7 +228,6 @@ export default function Home() {
             </button>
           </form>
 
-          {/* List */}
           <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5 lg:col-span-2">
             <h2 className="text-xl font-semibold">Uçuşlar</h2>
 
@@ -247,7 +250,9 @@ export default function Home() {
               </select>
             </div>
 
-            {loading ? (
+            {error ? (
+              <p className="mt-4 text-rose-400">Hata: {error}</p>
+            ) : loading ? (
               <p className="mt-4 text-slate-400">Yükleniyor...</p>
             ) : filteredFlights.length === 0 ? (
               <p className="mt-4 text-slate-400">Kayıt bulunamadı.</p>
